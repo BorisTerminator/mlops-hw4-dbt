@@ -1,0 +1,28 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: hw4-clickhouse
+    ports:
+      - "8123:8123"   # HTTP-интерфейс, через него ходит dbt
+      - "9000:9000"   # нативный протокол (clickhouse-client)
+    environment:
+      # пользователь default без пароля и с доступом по сети - только для учебного стенда
+      CLICKHOUSE_SKIP_USER_SETUP: 1
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - ./clickhouse:/sql:ro
+      - ./data:/data:ro
+      # при первом старте (пустой том) ClickHouse сам создаст базу и таблицу-источник
+      - ./clickhouse/01_source_ddl.sql:/docker-entrypoint-initdb.d/01_source_ddl.sql:ro
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  clickhouse_data:
