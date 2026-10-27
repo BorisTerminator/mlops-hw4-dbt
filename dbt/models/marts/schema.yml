@@ -1,0 +1,409 @@
+version: 2
+
+models:
+  - name: mart_daily_state_metrics
+    description: >
+      Дневные метрики по штатам: одна строка на пару (дата, штат), в которой были транзакции.
+      Объём, средний чек, P95 суммы, доля крупных транзакций (от large_amount_threshold)
+      и уровень фрода. Используется для мониторинга динамики по регионам.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ["transaction_date", "us_state"]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "large_transactions_count <= transactions_count and fraud_count <= transactions_count"
+    columns:
+      - name: transaction_date
+        description: Дата транзакций.
+        data_tests:
+          - not_null
+      - name: us_state
+        description: Штат, двухбуквенный код.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('states')
+                field: state_code
+      - name: state_name
+        description: Полное название штата из справочника states.
+        data_tests:
+          - not_null
+      - name: region
+        description: Регион США по классификации Бюро переписи.
+      - name: transactions_count
+        description: Число транзакций за день в штате.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+      - name: unique_customers
+        description: Число разных клиентов, совершивших транзакции за день.
+      - name: total_amount
+        description: Сумма транзакций, $.
+      - name: avg_amount
+        description: Средний чек, $.
+      - name: p95_amount
+        description: 95-й перцентиль суммы транзакции (макрос percentile, как quantileExact), $.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: false
+      - name: large_transactions_count
+        description: Число крупных транзакций (сумма от large_amount_threshold, по умолчанию $200).
+      - name: large_transactions_share_pct
+        description: Доля крупных транзакций, %.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: fraud_count
+        description: Число мошеннических транзакций.
+      - name: fraud_rate_pct
+        description: Доля мошеннических транзакций, %.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+
+  - name: mart_fraud_by_category
+    description: >
+      Фрод в разрезе категорий покупок: одна строка на категорию. Показывает, где
+      мошенничество встречается чаще всего (fraud_rate_rank = 1 — самая рискованная
+      категория) и какую долю оборота категории оно составляет.
+    data_tests:
+      - dbt_expectations.expect_table_row_count_to_equal:
+          arguments:
+            value: 14
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "fraud_count + legit_count = transactions_count"
+    columns:
+      - name: category
+        description: Категория покупки.
+        data_tests:
+          - not_null
+          - unique
+      - name: transactions_count
+        description: Всего транзакций в категории.
+      - name: fraud_count
+        description: Мошеннических транзакций.
+      - name: legit_count
+        description: Легитимных транзакций.
+      - name: fraud_rate_pct
+        description: Доля мошеннических транзакций, %.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: total_amount
+        description: Оборот категории, $.
+      - name: fraud_amount
+        description: Сумма мошеннических транзакций, $.
+      - name: fraud_amount_share_pct
+        description: Доля мошеннических сумм в обороте категории, %.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: avg_amount
+        description: Средний чек по всем транзакциям категории, $.
+      - name: avg_fraud_amount
+        description: Средний чек мошеннической транзакции, $ (0, если фрода нет).
+      - name: fraud_lift
+        description: Во сколько раз уровень фрода в категории выше среднего по всем транзакциям.
+      - name: fraud_rate_rank
+        description: Место категории по уровню фрода, 1 — самый высокий.
+        data_tests:
+          - not_null
+          - unique
+
+  - name: mart_fraud_by_state
+    description: >
+      Географический анализ фрода: одна строка на штат. Уровень фрода, число клиентов
+      и мерчантов (всего и задетых фродом), суммы. В штатах с одним-тремя клиентами
+      (DE, RI, AK) fraud_rate неустойчив — смотрите вместе с transactions_count.
+    data_tests:
+      - dbt_expectations.expect_table_row_count_to_equal_other_table:
+          arguments:
+            compare_model: ref('states')
+    columns:
+      - name: us_state
+        description: Штат, двухбуквенный код.
+        data_tests:
+          - not_null
+          - unique
+          - relationships:
+              arguments:
+                to: ref('states')
+                field: state_code
+      - name: state_name
+        description: Полное название штата.
+        data_tests:
+          - not_null
+      - name: region
+        description: Регион США.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["Northeast", "Midwest", "South", "West"]
+      - name: division
+        description: Подрайон внутри региона.
+      - name: transactions_count
+        description: Всего транзакций клиентов штата.
+      - name: fraud_count
+        description: Мошеннических транзакций.
+      - name: fraud_rate_pct
+        description: Доля мошеннических транзакций, %.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: unique_customers
+        description: Число разных клиентов из штата.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+      - name: fraud_victim_customers
+        description: Сколько клиентов штата столкнулись хотя бы с одной мошеннической транзакцией.
+      - name: unique_merchants
+        description: Число разных мерчантов, у которых покупали клиенты штата.
+      - name: fraud_merchants
+        description: Сколько из этих мерчантов замечены хотя бы в одной мошеннической транзакции.
+      - name: total_amount
+        description: Сумма транзакций, $.
+      - name: fraud_amount
+        description: Сумма мошеннических транзакций, $.
+      - name: fraud_amount_share_pct
+        description: Доля мошеннических сумм, %.
+      - name: avg_amount
+        description: Средний чек, $.
+      - name: fraud_rate_rank
+        description: Место штата по уровню фрода, 1 — самый высокий.
+        data_tests:
+          - unique
+
+  - name: mart_customer_risk_profile
+    description: >
+      Профиль риска клиента: одна строка на клиента. История транзакций, средний чек,
+      любимая категория, доля фрода и сегмент риска. HIGH — fraud_rate от
+      risk_high_fraud_rate_pct (2%), MEDIUM — от risk_medium_fraud_rate_pct (0.5%),
+      остальные LOW. Пороги задаются переменными проекта.
+    data_tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "first_transaction_at <= last_transaction_at and fraud_count <= transactions_count"
+      - dbt_expectations.expect_column_pair_values_A_to_be_greater_than_B:
+          arguments:
+            column_A: max_amount
+            column_B: avg_amount
+            or_equal: true
+    columns:
+      - name: customer_id
+        description: Суррогатный ключ клиента.
+        data_tests:
+          - not_null
+          - unique
+      - name: first_name
+        description: Имя.
+      - name: last_name
+        description: Фамилия.
+      - name: gender
+        description: Пол.
+      - name: city
+        description: Город.
+      - name: us_state
+        description: Штат.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('states')
+                field: state_code
+      - name: job
+        description: Профессия.
+      - name: top_category
+        description: Категория, в которой у клиента больше всего транзакций.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('mart_fraud_by_category')
+                field: category
+      - name: first_transaction_at
+        description: Первая транзакция клиента.
+      - name: last_transaction_at
+        description: Последняя транзакция клиента.
+      - name: active_days
+        description: Дней от первой до последней транзакции включительно.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+      - name: transactions_count
+        description: Всего транзакций клиента.
+      - name: total_amount
+        description: Сумма всех транзакций, $.
+      - name: avg_amount
+        description: Средний чек, $.
+      - name: max_amount
+        description: Самая крупная транзакция, $.
+      - name: fraud_count
+        description: Мошеннических транзакций по карте клиента.
+      - name: fraud_amount
+        description: Сумма мошеннических транзакций, $.
+      - name: fraud_rate_pct
+        description: Доля мошеннических транзакций клиента, %.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: last_fraud_at
+        description: Время последней мошеннической транзакции; NULL, если фрода не было.
+      - name: risk_segment
+        description: Сегмент риска клиента.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["HIGH", "MEDIUM", "LOW"]
+
+  - name: mart_hourly_fraud_pattern
+    description: >
+      Временные паттерны фрода: одна строка на пару (день недели, час), 7 × 24 = 168 окон.
+      fraud_lift показывает, во сколько раз фрод в окне выше среднего; окна с lift от
+      high_risk_window_multiplier (2) помечены is_high_risk_window. risk_rank = 1 — самое
+      опасное окно.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ["day_of_week", "transaction_hour"]
+      - dbt_expectations.expect_table_row_count_to_equal:
+          arguments:
+            value: 168
+    columns:
+      - name: day_of_week
+        description: ISO-номер дня недели, 1 — понедельник.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7]
+                quote: false
+      - name: day_name
+        description: Название дня недели.
+      - name: is_weekend
+        description: 1 для субботы и воскресенья.
+      - name: transaction_hour
+        description: Час суток, 0–23.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 23
+      - name: transactions_count
+        description: Всего транзакций в окне.
+      - name: fraud_count
+        description: Мошеннических транзакций в окне.
+      - name: fraud_rate_pct
+        description: Доля мошеннических транзакций, %.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: avg_amount
+        description: Средний чек, $.
+      - name: avg_fraud_amount
+        description: Средний чек мошеннической транзакции, $.
+      - name: fraud_lift
+        description: Отношение fraud_rate окна к среднему fraud_rate по всем транзакциям.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+      - name: is_high_risk_window
+        description: 1, если fraud_lift не меньше high_risk_window_multiplier.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+                quote: false
+      - name: risk_rank
+        description: Место окна по fraud_lift, 1 — самое рискованное.
+        data_tests:
+          - unique
+
+  - name: mart_merchant_analytics
+    description: >
+      Аналитика по мерчантам: одна строка на мерчанта. Оборот, клиенты, уровень фрода
+      и флаг подозрительности: fraud_rate выше общего в suspicious_merchant_fraud_multiplier
+      раз (3) при не менее suspicious_merchant_min_transactions (100) транзакциях.
+    columns:
+      - name: merchant_name
+        description: Название мерчанта.
+        data_tests:
+          - not_null
+          - unique
+      - name: primary_category
+        description: Основная категория мерчанта — та, где у него больше транзакций.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('mart_fraud_by_category')
+                field: category
+      - name: categories_count
+        description: В скольких категориях встречается мерчант.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+      - name: first_transaction_date
+        description: Дата первой транзакции у мерчанта.
+      - name: last_transaction_date
+        description: Дата последней транзакции у мерчанта.
+      - name: transactions_count
+        description: Всего транзакций.
+      - name: unique_customers
+        description: Число разных клиентов.
+      - name: turnover
+        description: Оборот мерчанта, $.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: false
+      - name: avg_amount
+        description: Средний чек, $.
+      - name: fraud_count
+        description: Мошеннических транзакций.
+      - name: fraud_amount
+        description: Сумма мошеннических транзакций, $.
+      - name: fraud_rate_pct
+        description: Доля мошеннических транзакций, %.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: fraud_lift
+        description: Во сколько раз fraud_rate мерчанта выше среднего по всем мерчантам.
+      - name: is_suspicious
+        description: 1, если мерчант подозрителен по правилу из описания модели.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+                quote: false

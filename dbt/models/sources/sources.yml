@@ -1,0 +1,65 @@
+version: 2
+
+sources:
+  - name: transactions_db
+    description: >
+      Сырые карточные транзакции из ДЗ по ClickHouse (train.csv, ~786 тыс. строк
+      за 2019-01-01 — 2020-03-10). Таблица создаётся скриптом clickhouse/01_source_ddl.sql
+      и заполняется clickhouse/02_load.sql.
+    schema: transactions_db
+    tables:
+      - name: transactions
+        description: Одна строка — одна транзакция клиента у мерчанта с разметкой фрода.
+        columns:
+          - name: transaction_time
+            description: Время транзакции с точностью до минуты.
+            data_tests:
+              - not_null
+          - name: merch
+            description: Название мерчанта, в выгрузке у всех есть технический префикс `fraud_`.
+            data_tests:
+              - not_null
+          - name: cat_id
+            description: Категория покупки (14 значений).
+            data_tests:
+              - not_null
+          - name: amount
+            description: Сумма транзакции в долларах.
+            data_tests:
+              - not_null
+          - name: name_1
+            description: Имя клиента.
+          - name: name_2
+            description: Фамилия клиента.
+          - name: gender
+            description: Пол клиента (M/F).
+          - name: street
+            description: Адрес клиента (улица и дом).
+          - name: one_city
+            description: Город клиента.
+          - name: us_state
+            description: Штат клиента, двухбуквенный код.
+            data_tests:
+              - not_null
+          - name: post_code
+            description: Почтовый индекс клиента; ведущие нули потеряны при загрузке в число.
+          - name: lat
+            description: Широта клиента.
+          - name: lon
+            description: Долгота клиента.
+          - name: population_city
+            description: Население города клиента.
+          - name: jobs
+            description: Профессия клиента.
+          - name: merchant_lat
+            description: Широта мерчанта.
+          - name: merchant_lon
+            description: Долгота мерчанта.
+          - name: target
+            description: Разметка фрода, 1 — мошенническая транзакция.
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [0, 1]
+                    quote: false

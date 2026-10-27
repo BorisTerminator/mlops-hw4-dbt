@@ -1,0 +1,53 @@
+[sqlfluff]
+dialect = clickhouse
+# dbt-шаблонизатор компилирует модели настоящим dbt: ref/source/var и макросы пакетов
+# разворачиваются так же, как при dbt run. Нужен поднятый ClickHouse и dbt deps.
+# Конфиг лежит в корне репозитория, а не в dbt/: шаблонизатор sqlfluff берёт только
+# из корневого конфига, а pre-commit запускает sqlfluff из корня.
+templater = dbt
+max_line_length = 120
+# CP03 (регистр функций) выключен: в ClickHouse имена функций чувствительны к регистру,
+# автоисправление countIf -> COUNTIF сломало бы запрос.
+exclude_rules = CP03
+large_file_skip_byte_limit = 40000
+
+[sqlfluff:templater:dbt]
+project_dir = dbt
+profiles_dir = dbt
+profile = fraud_analytics
+target = dev
+
+[sqlfluff:templater:jinja]
+apply_dbt_builtins = True
+
+[sqlfluff:indentation]
+indent_unit = space
+tab_space_size = 4
+indented_joins = False
+indented_using_on = True
+allow_implicit_indents = True
+
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.identifiers]
+extended_capitalisation_policy = lower
+unquoted_identifiers_policy = column_aliases
+
+[sqlfluff:rules:capitalisation.literals]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.types]
+extended_capitalisation_policy = lower
+
+[sqlfluff:rules:aliasing.table]
+aliasing = explicit
+
+[sqlfluff:rules:aliasing.column]
+aliasing = explicit
+
+[sqlfluff:rules:ambiguous.column_references]
+group_by_and_order_by_style = explicit
+
+[sqlfluff:rules:references.special_chars]
+allow_space_in_identifier = False

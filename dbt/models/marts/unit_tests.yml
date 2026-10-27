@@ -1,0 +1,74 @@
+unit_tests:
+  - name: test_customer_risk_segments
+    description: >
+      Сегментация клиентов по доле фрода. Пороги переопределены (HIGH от 50%, MEDIUM от 20%),
+      чтобы уложиться в несколько строк. Граница сегмента включается: ровно 20% — уже MEDIUM.
+    model: mart_customer_risk_profile
+    overrides:
+      vars:
+        risk_high_fraud_rate_pct: 50
+        risk_medium_fraud_rate_pct: 20
+    given:
+      - input: ref('stg_transactions')
+        rows:
+          # high: 1 фрод из 2 = 50%
+          - {customer_id: "high", category: "travel", transaction_time: "2019-01-01 10:00:00", amount: 100.0, is_fraud: 1}
+          - {customer_id: "high", category: "travel", transaction_time: "2019-01-03 10:00:00", amount: 20.0, is_fraud: 0}
+          # medium: 1 фрод из 5 = 20%, ровно на границе
+          - {customer_id: "medium", category: "home", transaction_time: "2019-01-01 10:00:00", amount: 10.0, is_fraud: 0}
+          - {customer_id: "medium", category: "home", transaction_time: "2019-01-01 11:00:00", amount: 10.0, is_fraud: 0}
+          - {customer_id: "medium", category: "home", transaction_time: "2019-01-01 12:00:00", amount: 10.0, is_fraud: 0}
+          - {customer_id: "medium", category: "travel", transaction_time: "2019-01-01 13:00:00", amount: 10.0, is_fraud: 0}
+          - {customer_id: "medium", category: "travel", transaction_time: "2019-01-01 14:00:00", amount: 60.0, is_fraud: 1}
+          # low: фрода нет
+          - {customer_id: "low", category: "home", transaction_time: "2019-01-01 10:00:00", amount: 30.0, is_fraud: 0}
+          - {customer_id: "low", category: "home", transaction_time: "2019-01-10 10:00:00", amount: 50.0, is_fraud: 0}
+    expect:
+      rows:
+        - {customer_id: "high", top_category: "travel", active_days: 3, transactions_count: 2, total_amount: 120.0, avg_amount: 60.0, max_amount: 100.0, fraud_count: 1, fraud_rate_pct: 50.0, risk_segment: "HIGH"}
+        - {customer_id: "medium", top_category: "home", active_days: 1, transactions_count: 5, total_amount: 100.0, avg_amount: 20.0, max_amount: 60.0, fraud_count: 1, fraud_rate_pct: 20.0, risk_segment: "MEDIUM"}
+        - {customer_id: "low", top_category: "home", active_days: 10, transactions_count: 2, total_amount: 80.0, avg_amount: 40.0, max_amount: 50.0, fraud_count: 0, fraud_rate_pct: 0.0, risk_segment: "LOW"}
+
+  - name: test_merchant_suspicious_flag
+    description: >
+      Флаг подозрительного мерчанта и основная категория. Общий fraud_rate = 2/8 = 25%.
+      У bad_shop 2 фрода из 3 (lift 2.67): подозрителен. У tiny_shop фрода нет,
+      у big_shop фрода нет; основная категория big_shop — та, где больше транзакций.
+    model: mart_merchant_analytics
+    overrides:
+      vars:
+        suspicious_merchant_fraud_multiplier: 2
+        suspicious_merchant_min_transactions: 3
+    given:
+      - input: ref('stg_transactions')
+        rows:
+          - {merchant_name: "bad_shop", category: "shopping_net", customer_id: "c1", transaction_date: "2019-01-01", amount: 500.0, is_fraud: 1}
+          - {merchant_name: "bad_shop", category: "shopping_net", customer_id: "c2", transaction_date: "2019-01-02", amount: 700.0, is_fraud: 1}
+          - {merchant_name: "bad_shop", category: "shopping_net", customer_id: "c1", transaction_date: "2019-01-03", amount: 100.0, is_fraud: 0}
+          - {merchant_name: "tiny_shop", category: "home", customer_id: "c1", transaction_date: "2019-01-01", amount: 10.0, is_fraud: 0}
+          - {merchant_name: "big_shop", category: "grocery_pos", customer_id: "c1", transaction_date: "2019-01-01", amount: 20.0, is_fraud: 0}
+          - {merchant_name: "big_shop", category: "grocery_pos", customer_id: "c2", transaction_date: "2019-01-02", amount: 20.0, is_fraud: 0}
+          - {merchant_name: "big_shop", category: "grocery_pos", customer_id: "c3", transaction_date: "2019-01-03", amount: 20.0, is_fraud: 0}
+          - {merchant_name: "big_shop", category: "grocery_net", customer_id: "c3", transaction_date: "2019-01-04", amount: 20.0, is_fraud: 0}
+    expect:
+      rows:
+        - {merchant_name: "bad_shop", primary_category: "shopping_net", categories_count: 1, transactions_count: 3, unique_customers: 2, turnover: 1300.0, fraud_count: 2, fraud_rate_pct: 66.67, fraud_lift: 2.67, is_suspicious: 1}
+        - {merchant_name: "tiny_shop", primary_category: "home", categories_count: 1, transactions_count: 1, unique_customers: 1, turnover: 10.0, fraud_count: 0, fraud_rate_pct: 0.0, fraud_lift: 0.0, is_suspicious: 0}
+        - {merchant_name: "big_shop", primary_category: "grocery_pos", categories_count: 2, transactions_count: 4, unique_customers: 3, turnover: 80.0, fraud_count: 0, fraud_rate_pct: 0.0, fraud_lift: 0.0, is_suspicious: 0}
+
+  - name: test_hourly_high_risk_window
+    description: >
+      Окно помечается рискованным, когда его fraud_rate хотя бы вдвое выше среднего.
+      Общий fraud_rate = 1/4 = 25%; окно пт 23:00 — 1/1 = 100% (lift 4), окно пн 10:00 — 0%.
+    model: mart_hourly_fraud_pattern
+    given:
+      - input: ref('stg_transactions')
+        rows:
+          - {day_of_week: 5, day_name: "Friday", is_weekend: 0, transaction_hour: 23, amount: 900.0, is_fraud: 1}
+          - {day_of_week: 1, day_name: "Monday", is_weekend: 0, transaction_hour: 10, amount: 10.0, is_fraud: 0}
+          - {day_of_week: 1, day_name: "Monday", is_weekend: 0, transaction_hour: 10, amount: 30.0, is_fraud: 0}
+          - {day_of_week: 1, day_name: "Monday", is_weekend: 0, transaction_hour: 10, amount: 20.0, is_fraud: 0}
+    expect:
+      rows:
+        - {day_of_week: 1, transaction_hour: 10, transactions_count: 3, fraud_count: 0, fraud_rate_pct: 0.0, avg_amount: 20.0, avg_fraud_amount: 0.0, fraud_lift: 0.0, is_high_risk_window: 0, risk_rank: 2}
+        - {day_of_week: 5, transaction_hour: 23, transactions_count: 1, fraud_count: 1, fraud_rate_pct: 100.0, avg_amount: 900.0, avg_fraud_amount: 900.0, fraud_lift: 4.0, is_high_risk_window: 1, risk_rank: 1}

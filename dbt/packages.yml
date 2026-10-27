@@ -1,0 +1,10 @@
+packages:
+  # generate_surrogate_key, unique_combination_of_columns, accepted_range, expression_is_true
+  - package: dbt-labs/dbt_utils
+    version: [">=1.3.0", "<2.0.0"]
+  # календарные функции: день недели, его название, календарная таблица
+  - package: godatadriven/dbt_date
+    version: [">=0.17.0", "<1.0.0"]
+  # тесты-ожидания в стиле Great Expectations
+  - package: metaplane/dbt_expectations
+    version: [">=0.10.0", "<0.11.0"]
