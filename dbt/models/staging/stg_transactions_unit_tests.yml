@@ -1,0 +1,21 @@
+unit_tests:
+  - name: test_stg_transactions_cleaning_and_amount_buckets
+    description: >
+      Очистка сырых полей и границы макроса amount_bucket: верхняя граница сегмента
+      не включается (10.00 — уже small, 200.00 — уже large и считается крупной).
+    model: stg_transactions
+    given:
+      - input: source('transactions_db', 'transactions')
+        rows:
+          - {transaction_time: "2019-06-03 10:00:00", merch: "fraud_Kirlin and Sons", cat_id: " Travel ", amount: 9.99, name_1: "Anna", name_2: "Lee", gender: "f", street: "1 Main St", one_city: "Boston", us_state: "ma", post_code: 2861, lat: 42.3, lon: -71.0, population_city: 1000, jobs: "Engineer", merchant_lat: 42.4, merchant_lon: -71.1, target: 0}
+          - {transaction_time: "2019-06-03 11:00:00", merch: "fraud_Kirlin and Sons", cat_id: "travel", amount: 10.0, name_1: "Anna", name_2: "Lee", gender: "F", street: "1 Main St", one_city: "Boston", us_state: "MA", post_code: 2861, lat: 42.3, lon: -71.0, population_city: 1000, jobs: "Engineer", merchant_lat: 42.4, merchant_lon: -71.1, target: 0}
+          - {transaction_time: "2019-06-03 12:00:00", merch: "fraud_Kirlin and Sons", cat_id: "travel", amount: 199.99, name_1: "Anna", name_2: "Lee", gender: "F", street: "1 Main St", one_city: "Boston", us_state: "MA", post_code: 2861, lat: 42.3, lon: -71.0, population_city: 1000, jobs: "Engineer", merchant_lat: 42.4, merchant_lon: -71.1, target: 0}
+          - {transaction_time: "2019-06-08 13:00:00", merch: "fraud_Kirlin and Sons", cat_id: "travel", amount: 200.0, name_1: "Anna", name_2: "Lee", gender: "F", street: "1 Main St", one_city: "Boston", us_state: "MA", post_code: 2861, lat: 42.3, lon: -71.0, population_city: 1000, jobs: "Engineer", merchant_lat: 42.4, merchant_lon: -71.1, target: 1}
+          - {transaction_time: "2019-06-09 23:00:00", merch: "fraud_Kirlin and Sons", cat_id: "travel", amount: 1000.0, name_1: "Anna", name_2: "Lee", gender: "F", street: "1 Main St", one_city: "Boston", us_state: "MA", post_code: 2861, lat: 42.3, lon: -71.0, population_city: 1000, jobs: "Engineer", merchant_lat: 42.4, merchant_lon: -71.1, target: 1}
+    expect:
+      rows:
+        - {merchant_name: "Kirlin and Sons", category: "travel", gender: "F", us_state: "MA", post_code: "02861", amount: 9.99, amount_bucket: "micro", is_large_amount: 0, day_of_week: 1, transaction_hour: 10, is_weekend: 0, is_fraud: 0}
+        - {merchant_name: "Kirlin and Sons", category: "travel", gender: "F", us_state: "MA", post_code: "02861", amount: 10.0, amount_bucket: "small", is_large_amount: 0, day_of_week: 1, transaction_hour: 11, is_weekend: 0, is_fraud: 0}
+        - {merchant_name: "Kirlin and Sons", category: "travel", gender: "F", us_state: "MA", post_code: "02861", amount: 199.99, amount_bucket: "medium", is_large_amount: 0, day_of_week: 1, transaction_hour: 12, is_weekend: 0, is_fraud: 0}
+        - {merchant_name: "Kirlin and Sons", category: "travel", gender: "F", us_state: "MA", post_code: "02861", amount: 200.0, amount_bucket: "large", is_large_amount: 1, day_of_week: 6, transaction_hour: 13, is_weekend: 1, is_fraud: 1}
+        - {merchant_name: "Kirlin and Sons", category: "travel", gender: "F", us_state: "MA", post_code: "02861", amount: 1000.0, amount_bucket: "huge", is_large_amount: 1, day_of_week: 7, transaction_hour: 23, is_weekend: 1, is_fraud: 1}

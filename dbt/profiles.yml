@@ -1,0 +1,17 @@
+# Профиль лежит в проекте, чтобы не трогать ~/.dbt: dbt ищет profiles.yml сначала
+# в текущем каталоге. Параметры подключения можно переопределить переменными окружения.
+fraud_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: clickhouse
+      host: "{{ env_var('CLICKHOUSE_HOST', 'localhost') }}"
+      port: "{{ env_var('CLICKHOUSE_PORT', '8123') | int }}"
+      user: "{{ env_var('CLICKHOUSE_USER', 'default') }}"
+      password: "{{ env_var('CLICKHOUSE_PASSWORD', '') }}"
+      # в ClickHouse schema dbt = база данных; слои получат суффиксы: dbt_staging, dbt_marts
+      schema: dbt
+      secure: false
+      threads: 4
+      connect_timeout: 10
+      send_receive_timeout: 300

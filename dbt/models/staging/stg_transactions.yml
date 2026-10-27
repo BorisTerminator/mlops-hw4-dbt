@@ -1,0 +1,187 @@
+version: 2
+
+models:
+  - name: stg_transactions
+    description: >
+      Очищенные транзакции, одна строка на транзакцию. Из названий мерчантов убран
+      технический префикс `fraud_`, строки обрезаны и приведены к единому регистру,
+      индекс дополнен ведущими нулями. Добавлены суррогатные ключи транзакции и клиента,
+      календарные поля (dbt_date), сегмент суммы (макрос amount_bucket) и расстояние
+      до мерчанта. Все витрины строятся от этой модели.
+    data_tests:
+      # staging не теряет и не размножает строки источника
+      - dbt_expectations.expect_table_row_count_to_equal_other_table:
+          arguments:
+            compare_model: source('transactions_db', 'transactions')
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "first_name != '' and last_name != '' and merchant_name != ''"
+    columns:
+      - name: transaction_id
+        description: >
+          Суррогатный ключ транзакции (md5 от времени, клиента, мерчанта и суммы).
+          В источнике id нет; полных дублей в данных нет, поэтому ключ уникален.
+        data_tests:
+          - not_null
+          - unique
+      - name: customer_id
+        description: Суррогатный ключ клиента (md5 от имени, фамилии, улицы и индекса).
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_unique_value_count_to_be_between:
+              arguments:
+                min_value: 900
+                max_value: 1000
+      - name: transaction_time
+        description: Время транзакции.
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: "'2019-01-01 00:00:00'"
+                max_value: "'2020-12-31 23:59:59'"
+      - name: transaction_date
+        description: Дата транзакции.
+        data_tests:
+          - not_null
+      - name: transaction_hour
+        description: Час транзакции, 0–23.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 23
+      - name: day_of_week
+        description: ISO-номер дня недели (dbt_date.day_of_week), 1 — понедельник, 7 — воскресенье.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7]
+                quote: false
+      - name: day_name
+        description: Название дня недели (dbt_date.day_name).
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+      - name: is_weekend
+        description: 1, если транзакция в субботу или воскресенье.
+      - name: merchant_name
+        description: Название мерчанта без технического префикса `fraud_`.
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_not_match_regex:
+              arguments:
+                regex: "^fraud_"
+      - name: category
+        description: Категория покупки в нижнем регистре.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - entertainment
+                  - food_dining
+                  - gas_transport
+                  - grocery_net
+                  - grocery_pos
+                  - health_fitness
+                  - home
+                  - kids_pets
+                  - misc_net
+                  - misc_pos
+                  - personal_care
+                  - shopping_net
+                  - shopping_pos
+                  - travel
+      - name: amount
+        description: Сумма транзакции в долларах, округлена до центов.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: false
+      - name: amount_bucket
+        description: >
+          Сегмент суммы из макроса amount_bucket: micro (<10), small (<50), medium (<200),
+          large (<1000), huge (от 1000). Границы — переменная amount_bucket_bounds.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["micro", "small", "medium", "large", "huge"]
+      - name: is_large_amount
+        description: 1, если сумма не меньше large_amount_threshold (по умолчанию 200).
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+                quote: false
+      - name: first_name
+        description: Имя клиента.
+      - name: last_name
+        description: Фамилия клиента.
+      - name: gender
+        description: Пол клиента.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["M", "F"]
+      - name: street
+        description: Адрес клиента.
+      - name: city
+        description: Город клиента.
+      - name: us_state
+        description: Штат клиента, двухбуквенный код.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('states')
+                field: state_code
+      - name: post_code
+        description: Почтовый индекс клиента, пять цифр с ведущими нулями.
+        data_tests:
+          - dbt_expectations.expect_column_values_to_match_regex:
+              arguments:
+                regex: "^[0-9]{5}$"
+      - name: customer_lat
+        description: Широта клиента.
+        data_tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 18
+                max_value: 72
+      - name: customer_lon
+        description: Долгота клиента.
+        data_tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: -180
+                max_value: -60
+      - name: city_population
+        description: Население города клиента.
+      - name: job
+        description: Профессия клиента.
+      - name: merchant_lat
+        description: Широта мерчанта.
+      - name: merchant_lon
+        description: Долгота мерчанта.
+      - name: distance_to_merchant_km
+        description: Расстояние между клиентом и мерчантом по дуге большого круга, км.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 500
+      - name: is_fraud
+        description: Разметка фрода, 1 — мошенническая транзакция.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+                quote: false

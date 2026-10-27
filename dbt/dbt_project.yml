@@ -1,0 +1,58 @@
+name: fraud_analytics
+version: "1.0.0"
+config-version: 2
+require-dbt-version: [">=1.8.0", "<2.0.0"]
+
+profile: fraud_analytics
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+analysis-paths: ["analyses"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - target
+  - dbt_packages
+  - logs
+
+# Макросы dbt_expectations сначала ищутся в этом проекте: здесь лежит
+# clickhouse__regexp_instr, которого нет в самом пакете.
+dispatch:
+  - macro_namespace: dbt_expectations
+    search_order: ["fraud_analytics", "dbt_expectations"]
+
+# Бизнес-пороги вынесены в переменные, чтобы их можно было менять без правки SQL:
+# dbt run --vars '{risk_high_fraud_rate_pct: 3}'
+vars:
+  # границы сегментов суммы для макроса amount_bucket (верхняя граница не включается)
+  amount_bucket_bounds:
+    micro: 10
+    small: 50
+    medium: 200
+    large: 1000
+  # с какого сегмента транзакция считается крупной: large и huge, т.е. от 200
+  large_amount_threshold: 200
+  # профиль риска клиента: доля фрода в %, от которой клиент HIGH / MEDIUM
+  risk_high_fraud_rate_pct: 2.0
+  risk_medium_fraud_rate_pct: 0.5
+  # мерчант подозрителен, если его fraud_rate выше общего в N раз
+  suspicious_merchant_fraud_multiplier: 3
+  suspicious_merchant_min_transactions: 100
+  # временное окно (день недели + час) рискованное, если fraud_rate выше общего в N раз
+  high_risk_window_multiplier: 2
+
+models:
+  fraud_analytics:
+    staging:
+      +schema: staging
+      +materialized: view
+    marts:
+      +schema: marts
+      +materialized: table
+      +engine: MergeTree()
+
+seeds:
+  fraud_analytics:
+    +schema: seeds
